@@ -27,31 +27,11 @@
 #define print   USBHost::print_
 #define println USBHost::println_
 
-void MIDIDeviceBase::init()
+void LowLevelMIDIDeviceBase::init()
 {
 	contribute_Pipes(mypipes, sizeof(mypipes)/sizeof(Pipe_t));
 	contribute_Transfers(mytransfers, sizeof(mytransfers)/sizeof(Transfer_t));
 	contribute_String_Buffers(mystring_bufs, sizeof(mystring_bufs)/sizeof(strbuf_t));
-	handleNoteOff = NULL;
-	handleNoteOn = NULL;
-	handleVelocityChange = NULL;
-	handleControlChange = NULL;
-	handleProgramChange = NULL;
-	handleAfterTouch = NULL;
-	handlePitchChange = NULL;
-	handleSysExPartial = NULL;
-	handleSysExComplete = NULL;
-	handleTimeCodeQuarterFrame = NULL;
-	handleSongPosition = NULL;
-	handleSongSelect = NULL;
-	handleTuneRequest = NULL;
-	handleClock = NULL;
-	handleStart = NULL;
-	handleContinue = NULL;
-	handleStop = NULL;
-	handleActiveSensing = NULL;
-	handleSystemReset = NULL;
-	handleRealTimeSystem = NULL;
 	rx_head = 0;
 	rx_tail = 0;
 	rxpipe = NULL;
@@ -83,7 +63,7 @@ void MIDIDeviceBase::init()
 //   EP_CONTROL_UNDEFINED 0x00
 //   ASSOCIATION_CONTROL  0x01
 
-bool MIDIDeviceBase::claim(Device_t *dev, int type, const uint8_t *descriptors, uint32_t len)
+bool LowLevelMIDIDeviceBase::claim(Device_t *dev, int type, const uint8_t *descriptors, uint32_t len)
 {
 	// only claim at interface level
 	if (type != 1) return false;
@@ -210,30 +190,25 @@ bool MIDIDeviceBase::claim(Device_t *dev, int type, const uint8_t *descriptors, 
 	}
 	rx_head = 0;
 	rx_tail = 0;
-	msg_channel = 0;
-	msg_type = 0;
-	msg_data1 = 0;
-	msg_data2 = 0;
-	msg_sysex_len = 0;
 	// claim if either pipe created
 	return (rxpipe || txpipe);
 }
 
-void MIDIDeviceBase::rx_callback(const Transfer_t *transfer)
+void LowLevelMIDIDeviceBase::rx_callback(const Transfer_t *transfer)
 {
 	if (transfer->driver) {
-		((MIDIDevice *)(transfer->driver))->rx_data(transfer);
+		((LowLevelMIDIDeviceBase *)(transfer->driver))->rx_data(transfer);
 	}
 }
 
-void MIDIDeviceBase::tx_callback(const Transfer_t *transfer)
+void LowLevelMIDIDeviceBase::tx_callback(const Transfer_t *transfer)
 {
 	if (transfer->driver) {
-		((MIDIDevice *)(transfer->driver))->tx_data(transfer);
+		((LowLevelMIDIDeviceBase *)(transfer->driver))->tx_data(transfer);
 	}
 }
 
-void MIDIDeviceBase::rx_data(const Transfer_t *transfer)
+void LowLevelMIDIDeviceBase::rx_data(const Transfer_t *transfer)
 {
 	println("MIDIDevice Receive");
 	print("  MIDI Data: ");
@@ -266,7 +241,7 @@ void MIDIDeviceBase::rx_data(const Transfer_t *transfer)
 	}
 }
 
-void MIDIDeviceBase::tx_data(const Transfer_t *transfer)
+void LowLevelMIDIDeviceBase::tx_data(const Transfer_t *transfer)
 {
 	println("MIDIDevice transmit complete");
 	print("  MIDI Data: ");
@@ -279,7 +254,7 @@ void MIDIDeviceBase::tx_data(const Transfer_t *transfer)
 }
 
 
-void MIDIDeviceBase::disconnect()
+void LowLevelMIDIDeviceBase::disconnect()
 {
 	// should rx_queue be cleared?
 	// as-is, the user can still read MIDI messages
@@ -289,7 +264,7 @@ void MIDIDeviceBase::disconnect()
 }
 
 
-void MIDIDeviceBase::write_packed(uint32_t data)
+void LowLevelMIDIDeviceBase::write_packed(uint32_t data)
 {
 	if (!txpipe) return;
 	uint32_t tx_max = tx_size / 4;
@@ -300,7 +275,7 @@ void MIDIDeviceBase::write_packed(uint32_t data)
 			// use tx_buffer1
 			tx_buffer1[tx1++] = data;
 			tx1_count = tx1;
-                        __disable_irq();
+			__disable_irq();
 			if (tx1 >= tx_max) {
 				queue_Data_Transfer(txpipe, tx_buffer1, tx_max*4, this);
 			} else {
@@ -309,14 +284,14 @@ void MIDIDeviceBase::write_packed(uint32_t data)
 				tx1_count = tx_max;
 				queue_Data_Transfer(txpipe, tx_buffer1, tx_max*4, this);
 			}
-                        __enable_irq();
+			__enable_irq();
 			return;
 		}
 		if (tx2 < tx_max) {
 			// use tx_buffer2
 			tx_buffer2[tx2++] = data;
 			tx2_count = tx2;
-                        __disable_irq();
+			__disable_irq();
 			if (tx2 >= tx_max) {
 				queue_Data_Transfer(txpipe, tx_buffer2, tx_max*4, this);
 			} else {
@@ -325,10 +300,30 @@ void MIDIDeviceBase::write_packed(uint32_t data)
 				tx2_count = tx_max;
 				queue_Data_Transfer(txpipe, tx_buffer2, tx_max*4, this);
 			}
-                        __enable_irq();
+			__enable_irq();
 			return;
 		}
 	}
+}
+
+uint32_t LowLevelMIDIDeviceBase::read_packed() {
+	uint32_t n, head, tail, avail;
+	head = rx_head;
+	tail = rx_tail;
+	if (head == tail) return 0;
+	if (++tail >= rx_queue_size) tail = 0;
+	n = rx_queue[tail];
+	rx_tail = tail;
+	if (!rx_packet_queued && rxpipe) {
+		avail = (head < tail) ? tail - head - 1 : rx_queue_size - 1 - head + tail;
+		if (avail >= (uint32_t)(rx_size>>2)) {
+			__disable_irq();
+			queue_Data_Transfer(rxpipe, rx_buffer, rx_size, this);
+			__enable_irq();
+		}
+	}
+	println("read: ", n, HEX);
+	return n;
 }
 
 void MIDIDeviceBase::send_sysex_buffer_has_term(const uint8_t *data, uint32_t length, uint8_t cable)
@@ -377,28 +372,12 @@ void MIDIDeviceBase::send_sysex_add_term_bytes(const uint8_t *data, uint32_t len
 	}
 }
 
-
-
-
 bool MIDIDeviceBase::read(uint8_t channel)
 {
-	uint32_t n, head, tail, avail, ch, type1, type2, b1;
+	uint32_t n, ch, type1, type2, b1;
 
-	head = rx_head;
-	tail = rx_tail;
-	if (head == tail) return false;
-	if (++tail >= rx_queue_size) tail = 0;
-	n = rx_queue[tail];
-	rx_tail = tail;
-	if (!rx_packet_queued && rxpipe) {
-	        avail = (head < tail) ? tail - head - 1 : rx_queue_size - 1 - head + tail;
-		if (avail >= (uint32_t)(rx_size>>2)) {
-			__disable_irq();
-			queue_Data_Transfer(rxpipe, rx_buffer, rx_size, this);
-			__enable_irq();
-		}
-	}
-	println("read: ", n, HEX);
+	n = read_packed();
+	if (n == 0) return false;
 
 	type1 = n & 15;
 	type2 = (n >> 12) & 15;
