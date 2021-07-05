@@ -114,6 +114,9 @@ bool msController::claim(Device_t *dev, int type, const uint8_t *descriptors, ui
 	msInCompleted = false;
 	msControlCompleted = false;
 	deviceAvailable = true;
+
+	memset(&msDriveInfo, 0, sizeof(msDriveInfo_t));
+
 	msDriveInfo.initialized = false;
 	msDriveInfo.connected = true;
 #ifdef DBGprint
@@ -131,7 +134,6 @@ void msController::disconnect()
 	println("Device Disconnected...");
 	msDriveInfo.connected = false;
 	msDriveInfo.initialized = false;
-	memset(&msDriveInfo, 0, sizeof(msDriveInfo_t));
 
 #ifdef DBGprint
 	print("   connected ");
